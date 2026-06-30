@@ -1,0 +1,151 @@
+// Cancer gene-prioritization EVIDENCE GRAPH.
+//
+// Given one or more cancer types, fan out over open public cancer genomics and
+// produce one ranked, explainable evidence table per type. Each evidence branch
+// is a facet that writes its per-gene table to the object store and returns the
+// PATH; the workflow graph carries only paths + scalars, so the graph itself is
+// the explanation. All data is open / no-auth: GDC (TCGA), GTEx, intOGen.
+
+namespace cancer.Evidence {
+
+    /** Over-expression + tumor-specificity. Downloads TCGA primary-tumor and
+      * matched solid-tissue-normal STAR-Counts (GDC), computes per-gene log2
+      * fold-change + Welch significance, and a tumor-specificity score vs the
+      * GTEx healthy-tissue baseline (cross-cohort, disclosed in the report).
+      * Emits the per-gene evidence table + the per-sample tumor matrix (the
+      * survival branch's input). */
+    event facet Expression(
+        project: String,
+        tumor_cap: Long = 520,
+        normal_cap: Long = 160
+    ) => (
+        expr_path: String,
+        tumor_matrix_path: String,
+        n_tumor: Int,
+        n_normal: Int,
+        candidate_count: Int,
+        gtex_tissue: String,
+        project_name: String
+    ) with Effect(kind = "external") with Cost(tier = "expensive") with Timeout(minutes = 40)
+
+    /** Per-gene somatic-mutation frequency from open GDC simple-somatic-mutation
+      * occurrences (masked/aggregated layer — no controlled access). */
+    event facet Mutation(project: String) => (
+        mutation_path: String,
+        n_cases: Int,
+        mutated_gene_count: Int
+    ) with Effect(kind = "external") with Cost(tier = "moderate") with Timeout(minutes = 20)
+
+    /** Known cancer-driver genes from the intOGen Compendium of Cancer Genes
+      * (CC0). Shared across cancer types. */
+    event facet Driver() => (
+        driver_path: String,
+        driver_count: Int
+    ) with Effect(kind = "external") with Cost(tier = "free") with Timeout(minutes = 10)
+
+    /** Survival association: split the project's tumor cases high/low by each
+      * candidate gene's expression and log-rank against GDC clinical overall
+      * survival. */
+    event facet Survival(
+        project: String,
+        expr_path: String,
+        tumor_matrix_path: String
+    ) => (
+        survival_path: String,
+        tested_genes: Int
+    ) with Effect(kind = "external") with Cost(tier = "moderate") with Timeout(minutes = 25)
+}
+
+namespace cancer.Rank {
+
+    /** Merge the evidence branches into one ranked table — a weighted
+      * z-combination of over-expression, tumor-specificity, survival, mutation
+      * and known-driver evidence. Weights are tunable inputs. */
+    event facet Composite(
+        project: String,
+        expr_path: String,
+        mutation_path: String,
+        driver_path: String,
+        survival_path: String,
+        top_n: Long = 50,
+        overexpression: Double = 1.0,
+        specificity: Double = 1.0,
+        survival: Double = 1.0,
+        mutation: Double = 0.8,
+        driver: Double = 1.2
+    ) => (
+        ranked_path: String,
+        ranked_count: Int,
+        top_genes: String
+    ) with Effect(kind = "io") with Cost(tier = "free") with Timeout(minutes = 10)
+}
+
+namespace cancer.Report {
+
+    /** Render the ranked evidence table to HTML — every score column links back
+      * to the FFL facet that produced it and the live public-dataset query. */
+    event facet EvidenceTable(
+        project: String,
+        ranked_path: String,
+        n_tumor: Int,
+        n_normal: Int,
+        gtex_tissue: String,
+        project_name: String
+    ) => (
+        html_path: String,
+        region: String,
+        gene_count: Int
+    ) with Effect(kind = "io") with Cost(tier = "free") with Timeout(minutes = 10)
+}
+
+namespace cancer.workflows {
+
+    use cancer.Evidence
+    use cancer.Rank
+    use cancer.Report
+
+    /** Prioritize genes across one or more cancer types. Fans out the whole
+      * evidence graph per cancer type and yields one published evidence table
+      * each. Default = lung adenocarcinoma; pass the 9 matched-normal TCGA
+      * projects to run them all. */
+    workflow PrioritizeGenes(
+        cancer_types: [String] = ["TCGA-LUAD"],
+        top_n: Long = 50
+    ) => (
+        status: String,
+        html_path: String,
+        region: String,
+        gene_count: Int
+    ) andThen foreach ct in $.cancer_types {
+        expr = Expression(project = $.ct)
+        mut = Mutation(project = $.ct)
+        drv = Driver()
+        surv = Survival(
+            project = $.ct,
+            expr_path = expr.expr_path,
+            tumor_matrix_path = expr.tumor_matrix_path
+        )
+        ranked = Composite(
+            project = $.ct,
+            expr_path = expr.expr_path,
+            mutation_path = mut.mutation_path,
+            driver_path = drv.driver_path,
+            survival_path = surv.survival_path,
+            top_n = $.top_n
+        )
+        table = EvidenceTable(
+            project = $.ct,
+            ranked_path = ranked.ranked_path,
+            n_tumor = expr.n_tumor,
+            n_normal = expr.n_normal,
+            gtex_tissue = expr.gtex_tissue,
+            project_name = expr.project_name
+        )
+        yield PrioritizeGenes(
+            status = "completed",
+            html_path = table.html_path,
+            region = table.region,
+            gene_count = table.gene_count
+        )
+    }
+}

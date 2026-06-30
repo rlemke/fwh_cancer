@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cancer"
+version = "0.1.0"
+description = "Facetwork domain: cancer gene-prioritization evidence graph (TCGA/GDC + GTEx + intOGen) -> ranked, explainable evidence table"
+authors = [{name = "Ralph Lemke"}]
+requires-python = ">=3.10"
+dependencies = ["requests", "pandas", "numpy", "scipy", "lifelines"]
+
+[project.entry-points."facetwork.domains"]
+cancer = "cancer:domain"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+cancer = ["ffl/*.ffl"]
