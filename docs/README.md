@@ -37,6 +37,7 @@ graph together.
 |------|----------------|
 | [ranking.md](ranking.md) | `cancer.Rank.Composite` — the fan-in: weighted z-combination of all evidence branches into one ranked, explainable table. |
 | [report.md](report.md) | `cancer.Report.EvidenceTable` — renders the ranked table to a provenance-linked, self-contained HTML page (every score → its facet + dataset). |
+| [ffl-examples.md](ffl-examples.md) | **Usage patterns.** A gallery of complete, compile-checked FFL examples over these facets — a minimal graph slice, implied parallelism, `foreach` over cancer types, re-weighting the ranking, mixins, `catch`, `when`. |
 
 ---
 
