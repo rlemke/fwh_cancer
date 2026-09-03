@@ -1,86 +1,61 @@
-"""Backend-aware paths for the cancer domain's cache + outputs.
+"""Backend-aware paths for the cancer domain.
 
-On the fleet (``FW_STORAGE=s3`` / ``FW_DATA_ROOT=s3://afl-cache``) cached
-expression matrices, evidence tables and rendered HTML land in the shared MinIO
-object store under ``$FW_DATA_ROOT/cache/cancer/...``; locally they fall back to
-a host path. A thin wrapper over ``facetwork.runtime.storage`` (the shape
-census-us / health use), so terminal use and fleet runs share one layout.
+⚠️ A THIN SHIM over ``facetwork.domains.storage``. This module was one of 21
+near-copies across the fwh_* repos; the shared layer owns the behaviour now and
+this file keeps the import path, the public names, and anything genuinely
+specific to cancer.
+
+⚠️ The arguments below pin where this domain's data ALREADY sits in the object
+store. They are not style — changing one orphans that data rather than moving
+it — and they were verified against the previous module across local, s3:// and
+hdfs:// before the switch.
 """
 from __future__ import annotations
-
 import io
 import os
 import tempfile
-
 from facetwork.config import get_output_base
 from facetwork.runtime import storage as _fws
 
+from facetwork.domains.storage import domain_storage, is_remote, join  # noqa: F401
 
-def is_remote(path: str) -> bool:
-    return "://" in (path or "")
+_S = domain_storage("cancer", layout="flat", cache_env="")
 
 
 def data_root() -> str:
-    return os.environ.get("FW_DATA_ROOT") or get_output_base()
-
-
-def join(*parts: str) -> str:
-    parts = [p for p in parts if p]
-    if not parts:
-        return ""
-    base = parts[0].rstrip("/")
-    rest = [p.strip("/") for p in parts[1:]]
-    return "/".join([base, *[p for p in rest if p]])
+    return _S.data_root()
 
 
 def cache_root() -> str:
-    """Cached intermediates (expression matrices, evidence tables) live here."""
-    r = data_root()
-    return join(r, "cache", "cancer") if is_remote(r) else join(r, "cancer-cache")
+    return _S.cache_root()
 
 
 def maps_root() -> str:
-    """Rendered evidence-table HTML bundles: <root>/cache/cancer/maps/<name>."""
-    r = data_root()
-    return join(r, "cache", "cancer", "maps") if is_remote(r) else join(r, "cancer-maps")
+    return _S.maps_root()
 
 
 def exists(path: str) -> bool:
-    return _fws.get_storage_backend(path).exists(path)
+    return _S.exists(path)
 
 
 def read_bytes(path: str) -> bytes:
-    if not is_remote(path):
-        with open(path, "rb") as f:
-            return f.read()
-    local = _fws.localize(path)
-    with open(local, "rb") as f:
-        return f.read()
+    return _S.read_bytes(path)
 
 
-def write_bytes(path: str, data: bytes) -> None:
-    if not is_remote(path):
-        parent = os.path.dirname(path)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        with open(path, "wb") as f:
-            f.write(data)
-        return
-    fd, tmp = tempfile.mkstemp(suffix="_" + os.path.basename(path))
-    try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-        with open(tmp, "rb") as src, _fws.get_storage_backend(path).open(path, "wb") as dst:
-            dst.write(src.read())
-    finally:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
+def write_bytes(path: str, body: bytes) -> None:
+    return _S.write_bytes(path, body)
 
 
-def write_text(path: str, text: str) -> None:
-    write_bytes(path, text.encode("utf-8"))
+def write_text(path: str, body: str) -> None:
+    return _S.write_text(path, body)
+
+
+def open_read(path: str, mode: str = "r", **kw):
+    return _S.open_read(path, mode, **kw)
+
+
+def open_write(path: str, mode: str = "w", **kw):
+    return _S.open_write(path, mode, **kw)
 
 
 def read_parquet(path: str):
