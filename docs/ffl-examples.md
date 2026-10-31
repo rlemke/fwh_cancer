@@ -346,7 +346,7 @@ namespace my.cancer {
 | Branch | `step = Facet(…) andThen when { case <bool> => { … } case _ => { … } }` |
 | Concatenate strings | `a ++ b` |
 
-**Validate before you run:** `afl my.ffl --check` or MCP `fw_validate`. Every error
+**Validate before you run:** `fw ffl compile --check --primary my.ffl --library <this domain's .ffl>` or MCP `fw_validate`. Every error
 carries a `rule_id` — fetch `fw://docs/rules/{rule_id}` for a wrong/right pair.
 
 ## See also
